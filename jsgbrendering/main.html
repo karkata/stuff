@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="JavaScript Global Rendering"/>
+    <title>JavaScript Global Rendering</title>
+    <link href="https://fonts.googleapis.com/css?family=Roboto+Mono&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/gh/google/code-prettify@master/loader/run_prettify.js?autoload=true"></script>
+    <link rel="stylesheet" type="text/css" href="../default.css"/>
+</head>
+<body>
+    <div class="main">
+        <section class="subject">
+            <h1>JavaScript Global Rendering</h1>
+            <p class="author">Karkata</p>
+            <p class="date">2021.7.8</p>
+            <p class="env">ASP.NET MVC, JavaScript</p>
+        </section>
+        <section class="content">
+            <p>페이지가 로드되면 서버로부터 어떤 정보를 가져와서 출력하는 페이지를 구현한다고 가정하자. 다음과 같은 페이지를 구성할 수 있을 것이다.</p>
+            <pre class="prettyprint">
+&lt;html&gt;
+    &lt;script&gt;
+        window.addEventListener("load", function () {
+            // Ajax라는 것이 있다고 치자.
+            Ajax.get(@Url.Action("Get", "Some"))
+                .then(function (res) {
+                    document.querySelector("#output").textContent = res.data;
+                })
+                .catch(function (err) { 
+                    alert(err); 
+                });
+        });
+    &lt;/script&gt;
+    &lt;body&gt;
+        &lt;p id="output"&gt;(none)&lt;/p&gt;
+    &lt;/body&gt;
+&lt;/html&gt; </pre>
+            <p>본인처럼 결벽증 같은 것이 있는 사람은 스크립트와 HTML을 구분하려고 할 것이다. (아니라면, '뒤로 가기'를 권한다.)</p>
+            <pre class="prettyprint">
+# html
+&lt;html&gt;
+    &lt;script src="app.js"&gt;&lt;!-- app.js 파일에 스크립트 코드가 존재한다. --&gt;&lt;/script&gt;
+    &lt;body&gt;
+        &lt;p id="output"&gt;(none)&lt;/p&gt;
+    &lt;/body&gt;
+&lt;/html&gt; 
+
+# app.js
+window.addEventListener("load", function () {
+    // 여기서 오류가 발생할 것이다.
+    Ajax.get(@Url.Action("Get", "Some"))
+        .then(function (res) {
+            document.querySelector("#output").textContent = res.data;
+        })
+        .catch(function (err) { 
+            alert(err); 
+        });
+});
+</pre>
+            <p>자바스크립트는 @Url.Action("Get", "Some")을 이해할 수 없어서 오류가 발생한다. 그러므로 요청 경로를 직접 작성해야 한다.</p>
+            <pre class="prettyprint">
+// 웹애플리케이션 루트가 WebApp일 경우
+Ajax.get("/WebApp/Some/Get").then(function (res) { ...
+</pre>
+            <p>
+                그러나 여기에 문제가 있다. 요청 경로는 여러 가지 환경에 따라 달라질 수 있기 때문에 대부분은 서버 측 코드에 의존하게 된다.
+                쉽게 말해 요청 경로는 서버 측 코드를 사용하여 렌더링 된다. 앞선 코드의 @Url.Action(...) 부분이 바로 이러한 예다. 
+                그러나 서버 측에서 자바스크립트 파일을 통째로 렌더링하지 않는 이상, 순수 자바스크립트 파일에는 서버 측 코드를 부분적으로 사용할 수는 없다.
+                그리고 자바스크립트 코드를 서버에서 렌더링하면, 자바스크립트 파일을 다운로드할 때마다, 서버에서 렌더링을 하므로 캐싱 정책 면에서도 득이 되지 않는다.
+            </p>
+            <p>우리가 원하는 것은 가능한 뷰(HTML)와 코드(스크립트)를 분리하되, (환경에 영향을 받는 부분을 제외하고) 리소스 캐싱까지 하고 싶은 것이다.</p>
+            <h2>의존 스크립트 렌더링</h2>
+            <p>서버에서 스크립트를 렌더링하는 것은 분리의 측면이나, 캐싱 측면에도 좋지 않다고 했다. 그러나 여기서 말하는 렌더링 대상은 환경에 영향을 받는 부분만을 말한다.</p>
+            <p>app.js 파일을 다음과 같이 고쳐보자.</p>
+            <pre class="prettyprint">
+// rootPath: 웹애플리케이션 루트 경로를 나타내는 전역 변수 
+Ajax.get(rootPath + "/Some/Get").then(function (res) { ...
+</pre>    
+            <p>환경에 영향을 받는 요청 경로를 만들 때, 변화가 예상되는 루트 경로를 rootPath 전역 변수를 사용하여 다루는 것을 볼 수 있다. app.js는 이것이 전부이고, 이제 rootPath를 서버 측 코드로 렌더링하는 부분을 만들기 위해서 다음과 같은 컨트롤러를 하나 생성하겠다.</p>
+            <pre class="prettyprint">
+public class JavaScriptGlobalSettingController : Controller
+{
+    public ActionResult Index()
+    {
+        return View();
+    }
+}           
+</pre>
+            <p>뷰(View)를 나타내는 Index.cshtml은 다음과 같다.</p>
+            <pre class="prettyprint">
+@{
+    Layout = null;
+    this.Response.ContentType = "text/javascript";
+    // 웹애플리케이션 루트 경로 =&gt; /WebApp
+    var rootPath = Url.Content("~/");
+    // 웹애플리케이션 루트 URL =&gt; http(s)://domain(:port)/WebApp
+    var rootUrl = new Uri(HttpContext.Current.Request.Url, rootPath).ToString();
+}
+var rootPath = "@rootPath";
+var rootUrl  = "@rootUrl";           
+</pre>
+            <p>페이지 소스는 다음과 같다.</p>
+            <pre class="prettyprint">
+&lt;html&gt;
+    &lt;script src="@Url.Action("JavaScriptGlobalSetting")"&gt;&lt;/script&gt;
+    &lt;script src="app.js"&gt;&lt;/script&gt;
+    &lt;body&gt;
+        &lt;p id="output"&gt;(none)&lt;/p&gt;
+    &lt;/body&gt;
+&lt;/html&gt; 
+</pre>
+            <p>환경에 영향을 받는 스크립트 부분만을 따로 렌더링하면, 그 외의 스크립트 파일들은 순수하게 스크립트 코드만을 사용할 수 있으며, 브라우저 캐싱 정책에 의하여 서버로의 리소스 다운로드 요청을 줄일 수 있다.</p>
+        </section>
+    </div>
+    <div class="footer">
+        <div class="main">
+            <p class="site">karkata.github.io</p>
+            <p class="email">karkata@gmail.com</p>
+        </div>
+    </div>
+</body>
+</html>

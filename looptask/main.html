@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoopTask Pattern</title>
+    <link href="https://fonts.googleapis.com/css?family=Roboto+Mono&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/gh/google/code-prettify@master/loader/run_prettify.js?autoload=true"></script>
+    <link rel="stylesheet" type="text/css" href="../default.css"/>
+</head>
+<body>
+    <div class="main">
+        <section class="subject">
+            <h1>LoopTask Pattern</h1>
+            <p class="author">Karkata</p>
+            <p class="date">2021.03.26 (2021.04.01 updated)</p>
+            <p class="env">JavaScript</p>
+        </section>
+        <section class="content">
+            <p>
+                LoopTask Pattern은 자바스크립트에서 일련의 작업(일종의 함수)들을 순차적으로 실행하는 루틴을 가지고 있는 패턴이다. 이런 기능은 이미 Promise를 사용하여 구현할 수 있지만, LoopTask는 Promise(고급스런)를 사용하기에 어려운 환경에서 비슷한 기능을 제공한다.
+            </p>
+            <p>LoopTask Pattern을 함수로 구현하면 다음과 같다. 함수 loopTask의 구조를 설명하기 전에 매개 변수 s에 대해서 먼저 알아보자.</p>
+            <pre class="prettyprint">
+/**
+ * 작업 루프를 실행하는 함수이다.
+ * @param s 'length, init, func, complete, error'를 속성으로 가지는 객체를 파라미터로 받는다.
+ */
+function loopTask(s) {
+    var index = -2;
+    var next = function () {
+        index++;
+        try {
+            if (index === -1) {
+                if (s.init && typeof s.init == "function") s.init(next);
+                else next();
+            } else if (-1 &lt; index && index &lt; (s.length || 0)) {
+                if (s.func && typeof s.func == "function") s.func(next, index);
+                else next();
+            } else {
+                if (s.complete && typeof s.complete == "function") s.complete();
+            }
+        } catch (ex) {
+            if (s.error && typeof s.error == "function") s.error(ex, index);
+        }
+    };
+    next();
+}</pre>    
+            <p>loopTask 함수의 매개 변수 s는 다음과 같은 객체로 선언되어야 한다.</p>
+            <pre class="prettyprint">
+var s = {
+    length: 1,
+    init: function (next) { ...; next(); },
+    func: function (next, index) { ...; next(); },
+    complete: function () { ...; },
+    error: function (ex, index) { ...; }
+};</pre>
+            <p>loopTask 함수는 매개 변수 s의 속성(함수)들을 순차적으로 호출한다. 맨 처음 init 그리고 length 값 만큼 func를 호출하고 마지막에 complete 속성을 호출한다. 중간에 오류가 발생하면 error 속성에 등록된 함수를 호출하며 작업을 종료한다.</p>
+            <pre class="prettyprint">
+var s = {
+    // 생략하면 func 함수가 호출되지 않는다.
+    length: 5,
+    // 생략 가능
+    init: function (next) { console.log("init"); next(); },
+    // 생략할 수 있지만, 생략하면 뭘 하려고 이걸 쓰나?
+    func: function (next, index) { console.log("func " + index); next(); },
+    // 생략 가능
+    complete: function () { console.log("complete"); },
+    // 생략 가능
+    error: function (ex, index) { console.log("error " + index + ": " + ex)}
+};
+
+loopTask(s)
+
+# 출력 결과
+init
+func 0
+func 1
+func 2
+func 3
+func 4
+complete </pre>
+            <p>init과 func 속성에 등록된 함수는 반드시 작업 루틴을 끝나고 나면 매개 변수 next 함수를 호출하도록 코드를 구성해야 한다. next를 호출하지 않는다면, 모든 작업은 그 시점에서 종료될 것이다.</p>
+            <p>LoopTask 패턴은 여러 작업을 순차적으로 수행하는 용도로 사용할 수 있다고 했다. 그러므로 작업을 순차적으로 실행시킬 때는 배열 또는 iterator를 사용하되, 요소로서 함수를 사용하면 된다.</p>
+            <pre class="prettyprint">
+var jobs = [
+    function () { console.log("Perform the job 1"); },
+    function () { console.log("Perform the job 2"); },
+    function () { console.log("Perform the job 3"); },
+    function () { console.log("Perform the job 4"); },
+    function () { console.log("Perform the job 5"); }
+];
+
+loopTask({
+    length: jobs.length,
+    func: function (next, i) { jobs[i](); next(); }
+});
+
+# 출력 결과
+Perform the job 1
+Perform the job 2
+Perform the job 3
+Perform the job 4
+Perform the job 5 </pre>
+            <h2>누산(Accumulation)</h2>
+            <p>순차적인 작업을 지원한다면, 1~10까지의 합을 계산하기 위해서 accumulator를 이용하는 방법이 생각날 것이다. 전역 변수를 하나를 만들고 계속 더하는 방법으로 해결하면 되지만, 외부 변수를 사용하지 말고 패턴을 다듬어 내부에서 해결하도록 구현해보자.</p>
+            <pre class="prettyprint">
+function loopTask(s) {
+    var index = -2;
+    var next = function (<strong>acc</strong>) {
+        index++;
+        try {
+            if (index === -1) {
+                if (s.init && typeof s.init == "function") s.init(next);
+                else next(<strong>acc</strong>);
+            } else if (-1 &lt; index &amp;&amp; index &lt; (s.length || 0)) {
+                if (s.func && typeof s.func == "function") s.func(next, index, <strong>acc</strong>));
+                else next(<strong>acc</strong>);
+            } else {
+                if (s.complete && typeof s.complete == "function") s.complete(<strong>acc</strong>);
+            }
+        } catch (ex) {
+            if (s.error && typeof s.error == "function") s.error(ex, index);
+        }
+    };
+    next(null);
+}</pre>
+            <p>loopTask 함수의 next 내부 함수가 매개 변수 acc를 갖도록 수정하였다. 다음은 1~10까지 합을 구하는 예제다.</p>
+            <pre class="prettyprint">
+var source = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+loopTask({
+    length: source.length,
+    // next(0) 함수 호출은 acc를 0으로 초기화한다.
+    // init은 생략되어도 상관 없다. acc가 null이기 때문에 연산할 때 0으로 평가된다.
+    init: function (next) { next(0); },
+    func: function (next, i, acc) { next(acc + source[i]); },
+    complete: function (acc) { console.log(acc); }
+});
+
+# 출력 결과
+55 </pre>
+            <p>그리고 loopTask 함수의 매개 변수 s는 고정된 타입이 아니기 때문에 다음과 같은 처리도 가능하다.</p>
+            <pre class="prettyprint">
+loopTask({
+    // 배열을 속성으로 넣었다.
+    data: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    // 매개 변수 s객체의 length 값을 init 함수에서 설정해주었다.
+    init: function (next) { this.length = this.data.length; next(0); },
+    func: function (next, i, acc) { next(acc + this.data[i]); },
+    complete: function (acc) { console.log(acc); }
+});
+
+# 출력 결과
+55 </pre>
+            <p>acc를 사용하면, 순차적으로 작업을 수행하고, 작업의 결과물을 집계할 수 있다.</p>
+            <pre class="prettyprint">
+jobs = [
+    function () { return "job 1"; },
+    function () { return "job 2"; },
+    function () { return "job 3"; },
+    function () { return "job 4"; },
+    function () { return "job 5"; }
+];
+
+loopTask({
+    length: jobs.length,
+    // acc를 배열로 만들었다.
+    init: function (next) { next([]); },
+    // 작업 결과를 배열에 담는다.
+    func: function (next, i, acc) { acc.push(jobs[i]()); next(acc); },
+    // 작업 결과를 출력한다.
+    complete: function (acc) { console.log("Performed: " + acc.join(" > ")); }
+});
+
+# 출력 결과
+Performed: job 1 > job 2 > job 3 > job 4 > job 5 </pre>
+            <h2>자동? 수동?</h2>
+            <p>loopTask 함수의 매개 변수 s를 선언할 때, init/func 속성의 함수마다 next() 함수를 호출하는 것이 불편할 수 있다. 또는 누락으로 인하여 작업들이 중간에 끝나는 일이 발생할 수 있다.</p>
+            <p>loopTask 함수 내부에서 next 함수를 호출하여 다음 작업으로의 연결을 알아서 처리하도록 하면 어떨까? 소스 코드는 다음과 같다.</p>
+            <pre class="prettyprint">
+function loopTask(s) {
+    var index = -2;
+    var next = function (acc) {
+        index++;
+        try {
+            if (index === -1) {
+                // init 함수의 반환값을 acc에 설정하는 방식을 사용하여 accumulation을 구현하도록 바꿨다.
+                if (s.init && typeof s.init == "function") acc = s.init();
+                // func 함수로 이동하기 위해서 next를 호출한다.
+                next(acc);
+            } else if (-1 &lt; index &amp;&amp; index &lt; (s.length || 0)) {
+                if (s.func && typeof s.func == "function") acc = s.func(index, acc);
+                next(acc);
+            } else {
+                if (s.complete && typeof s.complete == "function") s.complete(acc);
+            }
+        } catch (ex) {
+            if (s.error && typeof s.error == "function") s.error(ex, index);
+        }
+    };
+    next(null);
+};
+
+var source = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+loopTask({
+    length: source.length,
+    // init, func 둘 다 누적 처리를 위해서 return 문을 사용한다. 대신 next 호출은 사라졌다.
+    init: function () { return 0; },
+    func: function (i, acc) { return acc + source[i]; },
+    complete: function (acc) { console.log(acc); }
+});
+
+# 출력 결과
+55 </pre>
+            <p>사용성이 매우 좋아졌다. acc를 사용하지 않아도 되는 상황이라면 return 문을 사용할 필요도 없다.</p>
+            <p>
+                그러나 우리는 다음과 같은 비동기 작업 처리 상황을 고민해볼 필요가 있다.
+                예제 코드는 next 호출 방식을 사용하는 기존의 loopTask를 사용했을 때이다.
+            </p>
+            <pre class="prettyprint">
+var source = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+loopTask({
+    length: source.length,
+    init: function (next) { next(0); },
+    func: function (next, i, acc) {
+        // 비동기 작업 효과를 내기 위해서 setTimeout을 사용했다.
+        // 0.1밀리초마다 누산을 한다. 
+        setTimeout(function () { next(acc + source[i]) }, 100);
+    },
+    complete: function (acc) { console.log(acc); }
+});
+
+
+# 출력 결과
+55 </pre>
+            <p>그렇다면 수정된 loopTask를 이용하여 비동기 작업을 수행해보자.</p>
+            <pre class="prettyprint">
+// source 생략
+
+loopTask({
+    length: source.length,
+    init: function () { return 0; },
+    func: function (i, acc) {
+        setTimeout(function () {
+            acc += source[i];
+        }, 100);
+        // 0이 반환될 것이다.
+        return acc;
+    },
+    // 0을 콘솔에 출력할 것이다.
+    complete: function (acc) { console.log(acc); }
+}); </pre>
+            <p>func 함수는 계산된 값을 바로 반환해야 원하는 결과를 얻을텐데, 비동기 작업 때문에 누적된 값을 반환할 수 없다. 그렇다면 acc를 사용하지 않고 임시 변수를 사용해보자.</p>
+            <pre class="prettyprint">
+var temp = 0;
+
+loopTask({
+    length: source.length,
+    init: function () { return 0; },
+    func: function (i) { 
+        setTimeout(function () { temp += source[i]; }, 100);
+    },
+    complete: function (acc) { console.log(temp); }
+});
+
+# 출력 결과
+0 </pre>
+            <p>외부 변수를 사용하는 것도 해법이 아니다. 이것을 해결하려면 다음처럼 수정을 하면 원하는 결과값을 얻을 수 있다.</p>
+            <pre class="prettyprint">
+var temp = 0;
+
+loopTask({
+    length: source.length,
+    init: function () { return 0; },
+    func: function (i) { 
+        setTimeout(function () { temp += source[i]; }, 100);
+    },
+    complete: function (acc) { 
+        setTimeout(function () { console.log(temp); }, 100);
+    }
+});
+
+# 출력 결과
+55 </pre>
+            <p>complete 함수에서 setTimeout 처리를 해주면, temp 출력 코드가 나중에 처리(자세한 내용은 생략)가 되기 때문에 55가 출력된다.</p>
+            <p>그러나 이런 처리 루틴은 코드의 복잡성을 증가시킨다. next 함수를 개발자가 필요한 시점에 직접 호출하여 사용하는 방법과 loopTask 내부에서 자동으로 처리하는 방법 두 가지는 서로 장단점을 가지고 있기에 취사 선택이 필요하다고 하겠다. 추가로 async-await 패턴을 사용하여 굳이 후자 방식을 사용하려고 노력할 필요는 없다. LoopTask 패턴을 사용하느니, Promise를 사용하면 되니까...</p>
+            <h2>이게 다 무슨 소용?</h2>
+            <p>배열같은 자료구조에 작업(함수)을 넣어 놓고 순차적으로 실행을 하는 것이 목적이라면 굳이 loopTask같은 함수를 만들어 놓고 사용할 필요가 없다. 다음의 예를 보자.</p>
+            <pre class="prettyprint">
+var jobs = [
+    function () { console.log("Perform the job 1"); },
+    function () { console.log("Perform the job 2"); },
+    function () { console.log("Perform the job 3"); },
+    function () { console.log("Perform the job 4"); },
+    function () { console.log("Perform the job 5"); }
+];
+
+// 필요한 경우 이 위치에서 init 작업을 수행한다.
+
+// forEach는 IE 9부터 지원한다.
+// 그러나 배열이 아닌 NodeList와 같은 콜렉션 타입의 경우는 forEach를 지원하지 않기 때문에 pollyfill 작업이 필요하다.
+jobs.forEach(function (v) { v(); });
+
+// 필요한 경우 이 위치에서 complete 작업을 수행한다.
+
+# 출력 결과
+Perform the job 1
+Perform the job 2
+Perform the job 3
+Perform the job 4
+Perform the job 5</pre>
+            <p>집계를 위한 방법은 forEach 대신에 reduce를 사용하면 된다.</p>
+            <pre class="prettyprint">
+var jobs = [
+    function () { return "job 1"; },
+    function () { return "job 2"; },
+    function () { return "job 3"; },
+    function () { return "job 4"; },
+    function () { return "job 5"; }
+];
+
+var ret = jobs.reduce(function (acc, v) { acc.push(v()); return acc; }, []).join(" > ");
+console.log("Performed: " + ret);
+
+# 출력 결과
+Performed: job 1 > job 2 > job 3 > job 4 > job 5</pre>
+            <p>앞서 loopTask 함수에서 next를 직접 호출하는 방법과 함수 내부적으로 호출하는 두 가지 경우를 제시했다. 후자의 경우에는 forEach, reduce와 같은 도구를 사용하면 더 간결한 코드로 충분히 처리가 된다.</p>
+            <p>다만 비동기 처리를 해야하는 작업에서 forEach나 reduce와 같은 도구들은 의도대로 동작하지 않을 것이다. 물론 async-await 비동기 패턴을 사용하는 방법이 있겠지만 IE 8 환경에서 동작하도록 만든 loopTask와는 거리가 먼 기술이므로 논외로 한다. <span class="sub-comment">(사실 async-await는 forEach에서는 순차적인 작업 수행을 보장하지 못한다. async-await를 사용하여 순차적인 작업을 하려면 for, while 문을 사용해야 한다.)</span></p>
+        </section>
+    </div>
+    <div class="footer">
+        <div class="main">
+            <p class="site">karkata.github.io</p>
+            <p class="email">karkata@gmail.com</p>
+        </div>
+    </div>
+</body>
+</html>
